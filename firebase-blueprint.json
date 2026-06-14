@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "Scheme": {
+      "title": "Saving Scheme",
+      "description": "A saving scheme or investment asset (e.g. RD, SSY, Mutual Fund).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the scheme" },
+        "name": { "type": "string", "description": "Name of the scheme" },
+        "type": { "type": "string", "enum": ["RD", "SSY", "Stocks", "MF", "Chit", "Custom"], "description": "Type of the asset scheme" },
+        "sip": { "type": "number", "description": "Monthly investment/SIP amount" },
+        "plat": { "type": "string", "description": "Platform or institution (e.g. Groww, Post Office)" },
+        "userId": { "type": "string", "description": "The owner's Firebase auth UID" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "type", "sip", "plat", "userId"]
+    },
+    "Entry": {
+      "title": "Savings Entry Log",
+      "description": "An individual monthly payment or deposit entry for a scheme.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the log entry" },
+        "month": { "type": "string", "description": "The investment month in YYYY-MM format" },
+        "date": { "type": "string", "description": "The actual physical date of deposit in YYYY-MM-DD format" },
+        "schemeId": { "type": "string", "description": "ID of the associated saving scheme" },
+        "schemeName": { "type": "string", "description": "Name of the scheme for easy display" },
+        "schemeType": { "type": "string", "description": "Type of the scheme" },
+        "amount": { "type": "number", "description": "Invested amount in INR" },
+        "currentValue": { "type": "number", "description": "Current valuation of this entry" },
+        "returnPct": { "type": "number", "description": "Expected or current return percentage" },
+        "mode": { "type": "string", "description": "Payment mode (UPI, Cash, Auto-debit, etc.)" },
+        "notes": { "type": "string", "description": "Additional remarks or transaction reference IDs" },
+        "userId": { "type": "string", "description": "The owner's Firebase auth UID" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "month", "date", "schemeId", "schemeName", "schemeType", "amount", "currentValue", "userId"]
+    }
+  },
+  "firestore": {
+    "/schemes/{schemeId}": {
+      "schema": "Scheme",
+      "description": "User specific savings schemes and investment instruments."
+    },
+    "/entries/{entryId}": {
+      "schema": "Entry",
+      "description": "Log of monthly payment entries."
+    }
+  }
+}

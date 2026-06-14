@@ -1,0 +1,6 @@
+{
+  "name": "Savings Tracker",
+  "description": "A beautifully designed, mobile-first savings tracker to log payments, manage saving schemes, and track investment progress with local and offline database persistence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

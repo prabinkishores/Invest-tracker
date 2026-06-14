@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Scheme Validation Helper
+    function isValidScheme(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'sip', 'plat', 'userId']) &&
+             data.keys().size() >= 6 && data.keys().size() <= 7 &&
+             data.id is string && isValidId(data.id) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.type is string && (data.type == 'RD' || data.type == 'SSY' || data.type == 'Stocks' || data.type == 'MF' || data.type == 'Chit' || data.type == 'Custom') &&
+             (data.sip is int || data.sip is float) && data.sip >= 0 &&
+             data.plat is string && data.plat.size() <= 200 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             (!('createdAt' in data) || data.createdAt is string);
+    }
+
+    // Entry Validation Helper
+    function isValidEntry(data) {
+      return data.keys().hasAll(['id', 'month', 'date', 'schemeId', 'schemeName', 'schemeType', 'amount', 'currentValue', 'mode', 'notes', 'userId', 'createdAt']) &&
+             data.keys().size() >= 12 && data.keys().size() <= 13 &&
+             data.id is string && isValidId(data.id) &&
+             data.month is string && data.month.matches('^[0-9]{4}-[0-9]{2}$') &&
+             data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+             data.schemeId is string && isValidId(data.schemeId) &&
+             data.schemeName is string && data.schemeName.size() > 0 && data.schemeName.size() <= 200 &&
+             data.schemeType is string && (data.schemeType == 'RD' || data.schemeType == 'SSY' || data.schemeType == 'Stocks' || data.schemeType == 'MF' || data.schemeType == 'Chit' || data.schemeType == 'Custom') &&
+             (data.amount is int || data.amount is float) && data.amount > 0 &&
+             (data.currentValue is int || data.currentValue is float) && data.currentValue >= 0 &&
+             data.mode is string && data.mode.size() <= 100 &&
+             data.notes is string && data.notes.size() <= 2000 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.createdAt is string &&
+             (!('returnPct' in data) || (data.returnPct is int || data.returnPct is float));
+    }
+
+    // Schemes Collection Routing
+    match /schemes/{schemeId} {
+      allow create: if isSignedIn() && isValidId(schemeId) && isValidScheme(incoming());
+      allow update: if isSignedIn() && isValidId(schemeId) && isValidScheme(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(schemeId) && existing().userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(schemeId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Entries Collection Routing
+    match /entries/{entryId} {
+      allow create: if isSignedIn() && isValidId(entryId) && isValidEntry(incoming());
+      allow update: if isSignedIn() && isValidId(entryId) && isValidEntry(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
