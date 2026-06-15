@@ -3,8 +3,8 @@
   "appId": "1:309784714418:web:08d3fc07084f623dbcfdab",
   "apiKey": "AIzaSyASXXmnAEO2SwAFKgNrKeqA8k_XLvTBV8I",
   "authDomain": "isentropic-torus-xdpgw.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-68a115ac-a5d0-4bb3-ba1b-6a1b4fa6f1e8",
   "storageBucket": "isentropic-torus-xdpgw.firebasestorage.app",
   "messagingSenderId": "309784714418",
-  "measurementId": ""
+  "measurementId": "",
+  "firestoreDatabaseId": "ai-studio-68a115ac-a5d0-4bb3-ba1b-6a1b4fa6f1e8"
 }

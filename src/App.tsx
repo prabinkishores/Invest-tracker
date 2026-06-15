@@ -4,6 +4,7 @@ import SummaryCards from './components/SummaryCards';
 import LogPaymentForm from './components/LogPaymentForm';
 import SchemesPanel from './components/SchemesPanel';
 import LogsPanel from './components/LogsPanel';
+import SheetsPanel from './components/SheetsPanel';
 import Toast, { ToastMessage } from './components/Toast';
 import Dialog from './components/Dialog';
 import { Scheme, Entry } from './types';
@@ -13,10 +14,11 @@ import {
   getCachedEntries,
   saveCachedEntries,
 } from './lib/storage';
-import { CreditCard, Layers, FileSpreadsheet, Sparkles, TrendingUp } from 'lucide-react';
+import { CreditCard, Layers, FileSpreadsheet, Sparkles, TrendingUp, Share2, RefreshCw } from 'lucide-react';
+import { autoConnectSheets, appendEntriesToSheet, syncAllToSheet } from './lib/sheetsSync';
 
 // Firebase imports
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signOut, User, GoogleAuthProvider } from 'firebase/auth';
 import { collection, query, where, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider, OperationType, handleFirestoreError, sanitizePayload } from './lib/firebase';
 
@@ -27,6 +29,19 @@ export default function App() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+
+  // --- GOOGLE SHEETS STATE ---
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [sheetSyncEnabled, setSheetSyncEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('saving_tracker_sheet_sync_enabled') === 'true';
+  });
+  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(() => {
+    return localStorage.getItem('saving_tracker_spreadsheet_id');
+  });
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => {
+    return localStorage.getItem('saving_tracker_spreadsheet_url');
+  });
+  const [isSyncingToSheet, setIsSyncingToSheet] = useState(false);
 
   // --- COMPACT NAVIGATION FOR MOBILE ACTIVE VIEW ---
   // On mobile we show sticky bottom nav representing: 'dashboard' (Log payment), 'schemes', 'logs'
@@ -146,7 +161,16 @@ export default function App() {
   // --- SIGN IN AND SIGNOUT HANDLERS ---
   const handleSignIn = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleAccessToken(credential.accessToken);
+        triggerToast('Google login successful! Sheet scope connected.', 'success');
+        // Auto connect sheets
+        await handleConnectSheets(credential.accessToken);
+      } else {
+        triggerToast('Connected as Cloud User successfully.', 'success');
+      }
     } catch (err) {
       console.error('Sign In Failed:', err);
       triggerToast('Google Login was cancelled or skipped.', 'error');
@@ -156,10 +180,99 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
+      setGoogleAccessToken(null);
       triggerToast('Logged out securely.', 'info');
     } catch (err) {
       console.error('Sign Out Failed:', err);
       triggerToast('Signout error occurred.', 'error');
+    }
+  };
+
+  // --- GOOGLE SHEETS ACTIVE INTEGRATION HANDLERS ---
+  const handleConnectSheets = async (providedToken?: string) => {
+    let tokenToUse = providedToken || googleAccessToken;
+    setIsSyncingToSheet(true);
+    try {
+      if (!tokenToUse) {
+        // Trigger login popup to retrieve credential
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (!credential?.accessToken) {
+          throw new Error('Could not authorize Google Drive & Spreadsheets integration.');
+        }
+        tokenToUse = credential.accessToken;
+        setGoogleAccessToken(tokenToUse);
+      }
+
+      triggerToast('Searching / Creating "Saving Tracker Ledger" spreadsheet in your Google Drive...', 'info');
+      const conn = await autoConnectSheets(tokenToUse);
+      
+      setSpreadsheetId(conn.id);
+      setSpreadsheetUrl(conn.url);
+      setSheetSyncEnabled(true);
+      
+      localStorage.setItem('saving_tracker_spreadsheet_id', conn.id);
+      localStorage.setItem('saving_tracker_spreadsheet_url', conn.url);
+      localStorage.setItem('saving_tracker_sheet_sync_enabled', 'true');
+
+      if (conn.createdNew) {
+        triggerToast('New "Saving Tracker Ledger" Google Sheet created in your Drive!', 'success');
+      } else {
+        triggerToast('Google Sheet "Saving Tracker Ledger" connected successfully!', 'success');
+      }
+    } catch (err: any) {
+      console.error('Sheets connection failed:', err);
+      triggerToast(err.message || 'Failure connecting with Google Sheets API.', 'error');
+    } finally {
+      setIsSyncingToSheet(false);
+    }
+  };
+
+  const handleDisconnectSheets = () => {
+    setSheetSyncEnabled(false);
+    localStorage.removeItem('saving_tracker_sheet_sync_enabled');
+    triggerToast('Google Sheets auto-sync disabled.', 'info');
+  };
+
+  const handleBulkSync = async () => {
+    let tokenToUse = googleAccessToken;
+    if (!tokenToUse) {
+      try {
+        setIsSyncingToSheet(true);
+        const result = await signInWithPopup(auth, googleProvider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (!credential?.accessToken) {
+          throw new Error('Google authorization is required for syncing sheets.');
+        }
+        tokenToUse = credential.accessToken;
+        setGoogleAccessToken(tokenToUse);
+      } catch (err: any) {
+        triggerToast(err.message || 'Authorization failed.', 'error');
+        setIsSyncingToSheet(false);
+        return;
+      }
+    }
+
+    if (!spreadsheetId) {
+      triggerToast('No Google Sheet associated yet.', 'error');
+      setIsSyncingToSheet(false);
+      return;
+    }
+
+    setIsSyncingToSheet(true);
+    try {
+      triggerToast('Syncing all entries to your Google Sheet...', 'info');
+      const count = await syncAllToSheet(tokenToUse, spreadsheetId, entries);
+      if (count > 0) {
+        triggerToast(`Successfully uploaded ${count} logs to your Google Sheet!`, 'success');
+      } else {
+        triggerToast('Could not write database logs to spreadsheet.', 'error');
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerToast('Bulk spreadsheet sync failed.', 'error');
+    } finally {
+      setIsSyncingToSheet(false);
     }
   };
 
@@ -192,6 +305,24 @@ export default function App() {
     if (currentUser) {
       try {
         await setDoc(doc(db, 'entries', payload.id), sanitizePayload(payload));
+        // Safe auto-append to connected active sheet if enabled and token is valid
+        if (sheetSyncEnabled && spreadsheetId) {
+          if (googleAccessToken) {
+            appendEntriesToSheet(googleAccessToken, spreadsheetId, [payload])
+              .then((ok) => {
+                if (ok) {
+                  triggerToast('Log added & synced to your Google Sheet automagically!', 'success');
+                } else {
+                  triggerToast('Synced log locally but failed updating Google Sheet. Refresh Auth.', 'info');
+                }
+              })
+              .catch((err) => {
+                console.error('Google Sheets append failed', err);
+              });
+          } else {
+            triggerToast('Log added to Cloud. Authorize Sheets to trigger auto-sync.', 'info');
+          }
+        }
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `entries/${payload.id}`);
       }
@@ -378,6 +509,20 @@ export default function App() {
                 triggerToast={triggerToast}
               />
             </div>
+
+            {/* GOOGLE SHEETS SYNC CONTROL PANEL */}
+            <SheetsPanel
+              currentUser={currentUser}
+              googleAccessToken={googleAccessToken}
+              sheetSyncEnabled={sheetSyncEnabled}
+              spreadsheetId={spreadsheetId}
+              spreadsheetUrl={spreadsheetUrl}
+              isSyncingToSheet={isSyncingToSheet}
+              onConnectSheets={() => handleConnectSheets()}
+              onDisconnectSheets={handleDisconnectSheets}
+              onBulkSync={handleBulkSync}
+              totalEntriesCount={entries.length}
+            />
           </div>
 
           {/* COLUMN MATRIX (RIGHT ON DESKTOP - MAIN ENHANCED RECORDS) */}
